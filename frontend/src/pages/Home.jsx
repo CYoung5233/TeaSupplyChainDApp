@@ -65,11 +65,13 @@ const normalizeBatch = (raw) => {
 export default function Home() {
   const [account, setAccount] = useState("");
   const [chainId, setChainId] = useState("");
+  const [balance, setBalance] = useState("");
   const [notice, setNotice] = useState(null);
   const [busy, setBusy] = useState(false);
   const [batchQueryId, setBatchQueryId] = useState("");
   const [batch, setBatch] = useState(null);
   const [roleIds, setRoleIds] = useState({});
+  const [accountRoles, setAccountRoles] = useState([]);
   const [registerForm, setRegisterForm] = useState({
     farmerBatchId: "",
     origin: "",
@@ -102,13 +104,33 @@ export default function Home() {
     }
   }, [connected]);
 
+  const loadBalance = async (address) => {
+    if (!address || !isMetaMaskInstalled()) {
+      setBalance("");
+      return;
+    }
+    try {
+      const web3 = getWeb3();
+      const raw = await web3.eth.getBalance(address);
+      const eth = Number(web3.utils.fromWei(raw, "ether"));
+      setBalance(`${eth.toFixed(4)} ETH`);
+    } catch {
+      setBalance("");
+    }
+  };
+
   useEffect(() => {
     if (!isMetaMaskInstalled()) return;
     const handleAccounts = (accounts) => {
-      setAccount(accounts?.[0] || "");
+      const next = accounts?.[0] || "";
+      setAccount(next);
+      loadBalance(next);
     };
     const handleChain = (newChainId) => {
       setChainId(newChainId || "");
+      if (account) {
+        loadBalance(account);
+      }
     };
 
     window.ethereum.on("accountsChanged", handleAccounts);
@@ -129,8 +151,10 @@ export default function Home() {
       setBusy(true);
       const accounts = await requestAccounts();
       const currentChainId = await getChainId();
-      setAccount(accounts?.[0] || "");
+      const next = accounts?.[0] || "";
+      setAccount(next);
       setChainId(currentChainId || "");
+      await loadBalance(next);
       setNotice(null);
     } catch (err) {
       setNotice({ type: "error", message: err?.message || "Wallet connection failed." });
@@ -186,6 +210,40 @@ export default function Home() {
       setNotice({ type: "success", message: "Role IDs loaded." });
     } catch (err) {
       setNotice({ type: "error", message: err?.message || "Failed to load roles." });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const checkMyRoles = async () => {
+    if (!requireReady()) return;
+    try {
+      setBusy(true);
+      const ids = {
+        FARMER_ROLE: await contract.methods.FARMER_ROLE().call(),
+        PROCESSOR_ROLE: await contract.methods.PROCESSOR_ROLE().call(),
+        EXPORTER_ROLE: await contract.methods.EXPORTER_ROLE().call(),
+        DISTRIBUTOR_ROLE: await contract.methods.DISTRIBUTOR_ROLE().call(),
+        RETAILER_ROLE: await contract.methods.RETAILER_ROLE().call(),
+        END_CONSUMER_ROLE: await contract.methods.END_CONSUMER_ROLE().call(),
+      };
+      setRoleIds(ids);
+      const entries = await Promise.all(
+        Object.entries(ids).map(async ([name, id]) => {
+          const has = await contract.methods.hasRole(id, account).call();
+          return has ? name : null;
+        })
+      );
+      const active = entries.filter(Boolean);
+      setAccountRoles(active);
+      setNotice({
+        type: "success",
+        message: active.length
+          ? `Roles found: ${active.join(", ")}`
+          : "No roles found for this account.",
+      });
+    } catch (err) {
+      setNotice({ type: "error", message: err?.message || "Role check failed." });
     } finally {
       setBusy(false);
     }
@@ -268,6 +326,13 @@ export default function Home() {
             </div>
 
             <div className="mb-3">
+              <div className="text-muted small">Sepolia Balance</div>
+              <div className="copy-box">
+                {onSepolia && balance ? balance : "—"}
+              </div>
+            </div>
+
+            <div className="mb-3">
               <div className="text-muted small">Contract</div>
               <div className="copy-box">{CONTRACT_ADDRESS}</div>
               <a
@@ -345,10 +410,21 @@ export default function Home() {
               <Button variant="outlined" onClick={loadRoles} disabled={busy}>
                 Load Role IDs
               </Button>
+              <Button variant="outlined" onClick={checkMyRoles} disabled={busy}>
+                Check My Roles
+              </Button>
               {Object.keys(roleIds).length > 0 && (
                 <span className="muted">Loaded {Object.keys(roleIds).length} roles</span>
               )}
             </div>
+
+            {accountRoles.length > 0 && (
+              <div className="d-flex flex-wrap gap-2 mb-3">
+                {accountRoles.map((role) => (
+                  <Chip key={role} label={role} color="success" />
+                ))}
+              </div>
+            )}
 
             <div className="row g-3 align-items-end">
               <div className="col-12 col-md-5">
