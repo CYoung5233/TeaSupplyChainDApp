@@ -1,0 +1,118 @@
+:root {
+  --tea-ink: #1d1f1a;
+  --tea-dark: #243325;
+  --tea-olive: #3b5b3b;
+  --tea-leaf: #5c8a5c;
+  --tea-sand: #f6f1e8;
+  --tea-amber: #c18a2b;
+  --tea-rose: #e6d1b8;
+  --tea-glow: #f2e3c9;
+  --tea-border: rgba(29, 31, 26, 0.12);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: "Source Sans 3", system-ui, -apple-system, sans-serif;
+  color: var(--tea-ink);
+  background: radial-gradient(circle at 10% 10%, rgba(242, 227, 201, 0.7), transparent 35%),
+    radial-gradient(circle at 80% 20%, rgba(92, 138, 92, 0.25), transparent 45%),
+    linear-gradient(135deg, #f9f5ee 0%, #f1eadf 45%, #f7f0e4 100%);
+  min-height: 100vh;
+}
+
+.app-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.hero {
+  padding: 3.5rem 0 2rem;
+}
+
+.hero-title {
+  font-family: "Cormorant Garamond", "Times New Roman", serif;
+  font-size: clamp(2.4rem, 4vw, 3.6rem);
+  letter-spacing: 0.02em;
+  margin-bottom: 0.75rem;
+}
+
+.hero-subtitle {
+  max-width: 720px;
+  font-size: 1.05rem;
+  color: rgba(29, 31, 26, 0.75);
+}
+
+.glass-panel {
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid var(--tea-border);
+  border-radius: 18px;
+  box-shadow: 0 18px 50px rgba(36, 51, 37, 0.08);
+  backdrop-filter: blur(12px);
+}
+
+.card-title {
+  font-family: "Cormorant Garamond", "Times New Roman", serif;
+  font-size: 1.3rem;
+}
+
+.status-chip {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.section-title {
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-size: 0.85rem;
+  color: rgba(29, 31, 26, 0.6);
+}
+
+.form-label {
+  font-weight: 600;
+}
+
+.action-grid {
+  display: grid;
+  gap: 1.25rem;
+}
+
+@media (min-width: 992px) {
+  .action-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.badge-soft {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.75rem;
+  background: rgba(92, 138, 92, 0.15);
+  border-radius: 999px;
+  font-weight: 600;
+  color: var(--tea-olive);
+}
+
+.muted {
+  color: rgba(29, 31, 26, 0.65);
+}
+
+.copy-box {
+  font-family: "Source Sans 3", system-ui, -apple-system, sans-serif;
+  font-size: 0.9rem;
+  padding: 0.5rem 0.75rem;
+  background: rgba(255, 255, 255, 0.8);
+  border: 1px solid var(--tea-border);
+  border-radius: 10px;
+  word-break: break-all;
+}
+
+footer {
+  padding: 2rem 0 3rem;
+  color: rgba(29, 31, 26, 0.6);
+}

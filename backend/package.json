@@ -1,0 +1,44 @@
+{
+  "name": "teasupplychaindapp",
+  "version": "1.0.0",
+  "description": "Provides tracking of tea batches from farm to retailer. On-chain, transparent, & tamper-resistant.",
+  "homepage": "https://github.com/CYoung5233/TeaSupplyChainDApp#readme",
+  "bugs": {
+    "url": "https://github.com/CYoung5233/TeaSupplyChainDApp/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CYoung5233/TeaSupplyChainDApp.git"
+  },
+  "license": "GPL-3.0",
+  "author": "github.com/CYoung5233",
+  "type": "module",
+  "main": "hardhat.config.js",
+  "scripts": {
+    "refresh": "hardhat clean && hardhat compile",
+    "test": "npm run refresh && hardhat test",
+    "testConnection": "npx hardhat run scripts/connectSepolia.ts --network sepolia",
+    "load": "node --version && npm --version && npx -v && npm install && npm run refresh",
+    "deploy": "npx hardhat run scripts/deploy.ts --network sepolia",
+    "frontend": "npx http-server ./frontend -p 3000 -c-1 -o",
+    "setupRoles": "npx hardhat run scripts/setupRoles.ts --network sepolia"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-ethers": "^4.0.5",
+    "@nomicfoundation/hardhat-ignition": "^3.0.8",
+    "@nomicfoundation/hardhat-toolbox-mocha-ethers": "^3.0.3",
+    "@openzeppelin/contracts": "^5.6.1",
+    "@types/chai": "^5.2.3",
+    "@types/chai-as-promised": "^8.0.2",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^22.19.13",
+    "chai": "^6.2.2",
+    "dotenv": "^17.3.1",
+    "ethers": "^6.16.0",
+    "forge-std": "github:foundry-rs/forge-std#v1.9.4",
+    "hardhat": "^3.1.11",
+    "http-server": "^14.1.1",
+    "mocha": "^11.7.5",
+    "typescript": "~5.8.0"
+  }
+}
