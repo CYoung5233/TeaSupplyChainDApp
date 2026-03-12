@@ -43,7 +43,8 @@ package-lock.json
 
 */coverage
 
-compile-cache.json
+/backend/cache/compile-cache.json
+/backend/factories/Tea__factory.ts
 
-*/factories
+*/factories/*
 
