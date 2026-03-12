@@ -15,6 +15,20 @@ export const requestAccounts = async () => {
   return accounts || [];
 };
 
+export const requestAccountSelection = async () => {
+  return window.ethereum.request({
+    method: "wallet_requestPermissions",
+    params: [{ eth_accounts: {} }],
+  });
+};
+
+export const revokeAccountPermissions = async () => {
+  return window.ethereum.request({
+    method: "wallet_revokePermissions",
+    params: [{ eth_accounts: {} }],
+  });
+};
+
 export const getChainId = async () => {
   const chainId = await window.ethereum.request({ method: "eth_chainId" });
   return chainId;

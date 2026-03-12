@@ -16,7 +16,7 @@
   "main": "hardhat.config.js",
   "scripts": {
     "refresh": "hardhat clean && hardhat compile",
-    "test": "npm run refresh && hardhat test",
+    "test": "npm run refresh && hardhat test --coverage",
     "testConnection": "npx hardhat run scripts/connectSepolia.ts --network sepolia",
     "load": "node --version && npm --version && npx -v && npm install && npm run refresh",
     "deploy": "npx hardhat run scripts/deploy.ts --network sepolia",

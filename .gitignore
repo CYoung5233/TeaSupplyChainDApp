@@ -40,3 +40,10 @@ package-lock.json
 
 # Misc
 .DS_Store
+
+*/coverage
+
+compile-cache.json
+
+*/factories
+

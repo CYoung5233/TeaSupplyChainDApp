@@ -1,6 +1,5 @@
-import hre from "hardhat";
 import { network } from "hardhat";
-const { ethers } = await network.connect();
+const { ethers } = (await network.connect()) as any;
 
 
 async function main() {

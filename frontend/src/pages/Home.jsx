@@ -5,6 +5,8 @@ import {
   getChainId,
   isMetaMaskInstalled,
   requestAccounts,
+  requestAccountSelection,
+  revokeAccountPermissions,
   switchToSepolia,
 } from "../web3/web3";
 import { getTeaContract } from "../web3/contract";
@@ -22,6 +24,14 @@ const stateLabels = [
   "Distributed",
   "Retail",
   "Consumed",
+];
+const stateColors = [
+  "bg-secondary",
+  "bg-info",
+  "bg-primary",
+  "bg-warning",
+  "bg-success",
+  "bg-dark",
 ];
 
 const formatAddress = (value) => {
@@ -72,6 +82,11 @@ export default function Home() {
   const [batch, setBatch] = useState(null);
   const [roleIds, setRoleIds] = useState({});
   const [accountRoles, setAccountRoles] = useState([]);
+  const [myBatches, setMyBatches] = useState([]);
+  const [myBatchesLoading, setMyBatchesLoading] = useState(false);
+  const [totalBatches, setTotalBatches] = useState(0);
+  const [stateCounts, setStateCounts] = useState([0, 0, 0, 0, 0, 0]);
+  const [metricsLoading, setMetricsLoading] = useState(false);
   const [registerForm, setRegisterForm] = useState({
     farmerBatchId: "",
     origin: "",
@@ -163,6 +178,69 @@ export default function Home() {
     }
   };
 
+  const changeAccount = async () => {
+    if (!isMetaMaskInstalled()) {
+      setNotice({ type: "error", message: "MetaMask is required to use this DApp." });
+      return;
+    }
+    try {
+      setBusy(true);
+      await requestAccountSelection();
+      const accounts = await requestAccounts();
+      const currentChainId = await getChainId();
+      const next = accounts?.[0] || "";
+      setAccount(next);
+      setChainId(currentChainId || "");
+      await loadBalance(next);
+      setNotice(null);
+    } catch (err) {
+      const fallback = err?.code === -32601 || err?.code === 4200;
+      if (fallback) {
+        try {
+          const accounts = await requestAccounts();
+          const currentChainId = await getChainId();
+          const next = accounts?.[0] || "";
+          setAccount(next);
+          setChainId(currentChainId || "");
+          await loadBalance(next);
+          setNotice(null);
+        } catch (innerErr) {
+          setNotice({
+            type: "error",
+            message: innerErr?.message || "Account switch failed.",
+          });
+        }
+      } else {
+        setNotice({ type: "error", message: err?.message || "Account switch failed." });
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const disconnectWallet = async () => {
+    if (!isMetaMaskInstalled()) {
+      setAccount("");
+      setChainId("");
+      setBalance("");
+      return;
+    }
+    try {
+      setBusy(true);
+      await revokeAccountPermissions();
+    } catch (err) {
+      const unsupported = err?.code === -32601 || err?.code === 4200;
+      if (!unsupported) {
+        setNotice({ type: "error", message: err?.message || "Disconnect failed." });
+      }
+    } finally {
+      setAccount("");
+      setChainId("");
+      setBalance("");
+      setBusy(false);
+    }
+  };
+
   const requireReady = () => {
     if (!connected) {
       setNotice({ type: "error", message: "Connect your wallet first." });
@@ -249,10 +327,77 @@ export default function Home() {
     }
   };
 
-  const sendTx = async (method, successMessage) => {
+  const precheckTx = async (action, batchId) => {
+    if (!contract || !account) return null;
+    if (!batchId || Number(batchId) <= 0) return "Enter a valid batch ID.";
+    let batch;
+    try {
+      batch = await contract.methods.getBatch(batchId).call();
+    } catch {
+      return "Batch does not exist.";
+    }
+
+    const stateIndex = Number(batch.state);
+    const owner = batch.currentOwner;
+    if (owner?.toLowerCase() !== account.toLowerCase()) {
+      return "You are not the current owner of this batch.";
+    }
+
+    const roleIds = {
+      FARMER_ROLE: await contract.methods.FARMER_ROLE().call(),
+      PROCESSOR_ROLE: await contract.methods.PROCESSOR_ROLE().call(),
+      EXPORTER_ROLE: await contract.methods.EXPORTER_ROLE().call(),
+      DISTRIBUTOR_ROLE: await contract.methods.DISTRIBUTOR_ROLE().call(),
+      RETAILER_ROLE: await contract.methods.RETAILER_ROLE().call(),
+      END_CONSUMER_ROLE: await contract.methods.END_CONSUMER_ROLE().call(),
+    };
+
+    const roleMap = {
+      process: roleIds.PROCESSOR_ROLE,
+      export: roleIds.EXPORTER_ROLE,
+      distribute: roleIds.DISTRIBUTOR_ROLE,
+      retail: roleIds.RETAILER_ROLE,
+      consume: roleIds.END_CONSUMER_ROLE,
+    };
+
+    const hasRequiredRole =
+      action in roleMap
+        ? await contract.methods.hasRole(roleMap[action], account).call()
+        : true;
+
+    if (!hasRequiredRole) {
+      return "Your account is missing the required role for this action.";
+    }
+
+    if (action === "process" && stateIndex !== 0) {
+      return "Batch must be Registered before processing.";
+    }
+    if (action === "export" && ![1, 2, 3].includes(stateIndex)) {
+      return "Batch must be Processed/Exported/Distributed before export.";
+    }
+    if (action === "distribute" && ![1, 2, 3].includes(stateIndex)) {
+      return "Batch must be Processed/Exported/Distributed before distribution.";
+    }
+    if (action === "retail" && stateIndex !== 3) {
+      return "Batch must be Distributed before retail.";
+    }
+    if (action === "consume" && stateIndex !== 4) {
+      return "Batch must be Retail before consumption.";
+    }
+    return null;
+  };
+
+  const sendTx = async (method, successMessage, precheck) => {
     if (!requireReady()) return;
     try {
       setBusy(true);
+      if (precheck) {
+        const reason = await precheck();
+        if (reason) {
+          setNotice({ type: "warning", message: reason });
+          return;
+        }
+      }
       await method.send({ from: account });
       setNotice({ type: "success", message: successMessage });
     } catch (err) {
@@ -273,10 +418,85 @@ export default function Home() {
       setBatch(normalizeBatch(raw));
       setNotice(null);
     } catch (err) {
-      setNotice({ type: "error", message: err?.message || "Batch lookup failed." });
+      setNotice({
+        type: "error",
+        message:
+          "Invalid batch ID. Please enter a valid batch number that exists on-chain.",
+      });
       setBatch(null);
     } finally {
       setBusy(false);
+    }
+  };
+
+  const loadMyBatches = async () => {
+    if (!contract || !account) {
+      setNotice({ type: "error", message: "Connect your wallet first." });
+      return;
+    }
+    try {
+      setMyBatchesLoading(true);
+      const current = Number(await contract.methods.getCurrentBatchId().call());
+      if (!current) {
+        setMyBatches([]);
+        setNotice(null);
+        return;
+      }
+      const calls = Array.from({ length: current }, (_, idx) =>
+        contract.methods.getBatchBasic(idx + 1).call()
+      );
+      const results = await Promise.all(calls);
+      const owned = results
+        .map((entry, idx) => {
+          const owner = entry[5];
+          if (!owner || owner.toLowerCase() !== account.toLowerCase()) return null;
+          return { id: idx + 1, state: entry[6] };
+        })
+        .filter(Boolean);
+      setMyBatches(owned);
+      setNotice(null);
+    } catch (err) {
+      setNotice({
+        type: "error",
+        message: err?.message || "Failed to load batches for this account.",
+      });
+    } finally {
+      setMyBatchesLoading(false);
+    }
+  };
+
+  const loadMetrics = async () => {
+    if (!contract) {
+      setNotice({ type: "error", message: "Connect your wallet to load metrics." });
+      return;
+    }
+    try {
+      setMetricsLoading(true);
+      const current = Number(await contract.methods.getCurrentBatchId().call());
+      if (!current) {
+        setTotalBatches(0);
+        setStateCounts([0, 0, 0, 0, 0, 0]);
+        setNotice(null);
+        return;
+      }
+      const calls = Array.from({ length: current }, (_, idx) =>
+        contract.methods.getBatchBasic(idx + 1).call()
+      );
+      const results = await Promise.all(calls);
+      const counts = [0, 0, 0, 0, 0, 0];
+      results.forEach((entry) => {
+        const stateIndex = Number(entry[6]);
+        if (Number.isFinite(stateIndex) && counts[stateIndex] !== undefined) {
+          counts[stateIndex] += 1;
+        }
+      });
+      setTotalBatches(current);
+      setStateCounts(counts);
+      setNotice(null);
+    } catch (err) {
+      setNotice({ type: "error", message: err?.message || "Failed to load metrics." });
+    } finally {
+      setMetricsLoading(false);
     }
   };
 
@@ -296,13 +516,60 @@ export default function Home() {
   return (
     <div className="container py-4">
       <section className="hero">
-        <div className="badge-soft mb-3">Tea Supply Chain DApp</div>
-        <h1 className="hero-title">Trace every leaf from farm to cup.</h1>
-        <p className="hero-subtitle">
-          Verify origin, processing, and custody in one transparent ledger. Built
-          on Sepolia with on-chain provenance, role-based updates, and immutable
-          event history.
-        </p>
+        <div className="row g-4 align-items-start">
+          <div className="col-12 col-lg-7">
+            <div className="d-flex flex-wrap gap-2 mb-3">
+              <div className="badge-soft">Tea Supply Chain DApp</div>
+              <div className="badge-soft">Total batches on chain: {totalBatches}</div>
+            </div>
+            <h1 className="hero-title">Trace every leaf from farm to cup.</h1>
+            <p className="hero-subtitle">
+              Verify origin, processing, and custody in one transparent ledger. Built
+              on Sepolia with on-chain provenance, role-based updates, and immutable
+              event history.
+            </p>
+          </div>
+          <div className="col-12 col-lg-5">
+            <div className="glass-panel p-3">
+              <div className="d-flex align-items-center justify-content-between mb-2">
+                <div className="section-title">Snapshot</div>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  disabled={metricsLoading}
+                  onClick={loadMetrics}
+                >
+                  Refresh
+                </Button>
+              </div>
+              {stateLabels.map((label, idx) => {
+                const count = stateCounts[idx] || 0;
+                const percent = totalBatches ? Math.round((count / totalBatches) * 100) : 0;
+                return (
+                  <div key={label} className="mb-2">
+                    <div className="d-flex justify-content-between small">
+                      <span>{label}</span>
+                      <span>{count}</span>
+                    </div>
+                    <div className="progress" style={{ height: "6px" }}>
+                      <div
+                        className={`progress-bar ${stateColors[idx]}`}
+                        role="progressbar"
+                        style={{ width: `${percent}%` }}
+                        aria-valuenow={percent}
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+              {totalBatches === 0 && (
+                <div className="muted small">No batches yet. Refresh after registering.</div>
+              )}
+            </div>
+          </div>
+        </div>
       </section>
 
       <div className="row g-4">
@@ -355,10 +622,24 @@ export default function Home() {
               </Button>
               <Button
                 variant="outlined"
+                disabled={busy || !connected}
+                onClick={changeAccount}
+              >
+                Change Account
+              </Button>
+              <Button
+                variant="outlined"
                 disabled={busy || onSepolia}
                 onClick={handleSwitch}
               >
                 Switch to Sepolia
+              </Button>
+              <Button
+                variant="text"
+                disabled={busy || !connected}
+                onClick={disconnectWallet}
+              >
+                Disconnect
               </Button>
             </div>
           </div>
@@ -395,6 +676,35 @@ export default function Home() {
               </div>
             )}
           </div>
+
+          <div className="glass-panel p-4 mt-4">
+            <div className="section-title mb-2">My Batch IDs</div>
+            <div className="d-flex align-items-center gap-2 mb-3">
+              <Button
+                variant="outlined"
+                size="small"
+                disabled={myBatchesLoading}
+                onClick={loadMyBatches}
+              >
+                Refresh
+              </Button>
+              <span className="muted">
+                {myBatches.length ? `${myBatches.length} found` : "No batches yet"}
+              </span>
+            </div>
+            {myBatches.length > 0 ? (
+              <div className="d-flex flex-wrap gap-2">
+                {myBatches.map((item) => (
+                  <Chip
+                    key={item.id}
+                    label={`#${item.id} • ${stateLabels[Number(item.state)] || item.state}`}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="muted">Connect and refresh to see owned batches.</div>
+            )}
+          </div>
         </div>
 
         <div className="col-12 col-lg-8">
@@ -405,71 +715,6 @@ export default function Home() {
           )}
 
           <div className="glass-panel p-4 mb-4">
-            <div className="section-title mb-3">Role Administration</div>
-            <div className="d-flex flex-wrap gap-2 mb-3">
-              <Button variant="outlined" onClick={loadRoles} disabled={busy}>
-                Load Role IDs
-              </Button>
-              <Button variant="outlined" onClick={checkMyRoles} disabled={busy}>
-                Check My Roles
-              </Button>
-              {Object.keys(roleIds).length > 0 && (
-                <span className="muted">Loaded {Object.keys(roleIds).length} roles</span>
-              )}
-            </div>
-
-            {accountRoles.length > 0 && (
-              <div className="d-flex flex-wrap gap-2 mb-3">
-                {accountRoles.map((role) => (
-                  <Chip key={role} label={role} color="success" />
-                ))}
-              </div>
-            )}
-
-            <div className="row g-3 align-items-end">
-              <div className="col-12 col-md-5">
-                <label className="form-label">Role</label>
-                <select
-                  className="form-select"
-                  value={grantForm.role}
-                  onChange={(event) =>
-                    setGrantForm((prev) => ({ ...prev, role: event.target.value }))
-                  }
-                >
-                  {[
-                    "FARMER_ROLE",
-                    "PROCESSOR_ROLE",
-                    "EXPORTER_ROLE",
-                    "DISTRIBUTOR_ROLE",
-                    "RETAILER_ROLE",
-                    "END_CONSUMER_ROLE",
-                  ].map((role) => (
-                    <option key={role} value={role}>
-                      {role}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="col-12 col-md-5">
-                <TextField
-                  label="Wallet Address"
-                  size="small"
-                  value={grantForm.address}
-                  onChange={(event) =>
-                    setGrantForm((prev) => ({ ...prev, address: event.target.value }))
-                  }
-                  fullWidth
-                />
-              </div>
-              <div className="col-12 col-md-2 d-grid">
-                <Button variant="contained" onClick={grantRole} disabled={busy}>
-                  Grant
-                </Button>
-              </div>
-            </div>
-          </div>
-
-          <div className="glass-panel p-4">
             <div className="section-title mb-3">Batch Actions</div>
             <div className="action-grid">
               <div className="card border-0 shadow-sm">
@@ -606,7 +851,8 @@ export default function Home() {
                           epochFromDate(processForm.packagedDate),
                           processForm.processingMethod
                         ),
-                        "Batch processed"
+                        "Batch processed",
+                        () => precheckTx("process", processForm.batchId)
                       )
                     }
                   >
@@ -632,7 +878,11 @@ export default function Home() {
                     disabled={busy}
                     onClick={() =>
                       contract &&
-                      sendTx(contract.methods.exportBatch(simpleBatchId), "Batch exported")
+                      sendTx(
+                        contract.methods.exportBatch(simpleBatchId),
+                        "Batch exported",
+                        () => precheckTx("export", simpleBatchId)
+                      )
                     }
                   >
                     Export
@@ -659,7 +909,8 @@ export default function Home() {
                       contract &&
                       sendTx(
                         contract.methods.distributeBatch(simpleBatchId),
-                        "Batch distributed"
+                        "Batch distributed",
+                        () => precheckTx("distribute", simpleBatchId)
                       )
                     }
                   >
@@ -685,7 +936,11 @@ export default function Home() {
                     disabled={busy}
                     onClick={() =>
                       contract &&
-                      sendTx(contract.methods.markRetail(simpleBatchId), "Batch retail set")
+                      sendTx(
+                        contract.methods.markRetail(simpleBatchId),
+                        "Batch retail set",
+                        () => precheckTx("retail", simpleBatchId)
+                      )
                     }
                   >
                     Retail
@@ -710,7 +965,11 @@ export default function Home() {
                     disabled={busy}
                     onClick={() =>
                       contract &&
-                      sendTx(contract.methods.consumeBatch(simpleBatchId), "Batch consumed")
+                      sendTx(
+                        contract.methods.consumeBatch(simpleBatchId),
+                        "Batch consumed",
+                        () => precheckTx("consume", simpleBatchId)
+                      )
                     }
                   >
                     Consume
@@ -788,6 +1047,71 @@ export default function Home() {
                     Accept
                   </Button>
                 </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="glass-panel p-4">
+            <div className="section-title mb-3">Role Administration</div>
+            <div className="d-flex flex-wrap gap-2 mb-3">
+              <Button variant="outlined" onClick={loadRoles} disabled={busy}>
+                Load Role IDs
+              </Button>
+              <Button variant="outlined" onClick={checkMyRoles} disabled={busy}>
+                Check My Roles
+              </Button>
+              {Object.keys(roleIds).length > 0 && (
+                <span className="muted">Loaded {Object.keys(roleIds).length} roles</span>
+              )}
+            </div>
+
+            {accountRoles.length > 0 && (
+              <div className="d-flex flex-wrap gap-2 mb-3">
+                {accountRoles.map((role) => (
+                  <Chip key={role} label={role} color="success" />
+                ))}
+              </div>
+            )}
+
+            <div className="row g-3 align-items-end">
+              <div className="col-12 col-md-5">
+                <label className="form-label">Role</label>
+                <select
+                  className="form-select"
+                  value={grantForm.role}
+                  onChange={(event) =>
+                    setGrantForm((prev) => ({ ...prev, role: event.target.value }))
+                  }
+                >
+                  {[
+                    "FARMER_ROLE",
+                    "PROCESSOR_ROLE",
+                    "EXPORTER_ROLE",
+                    "DISTRIBUTOR_ROLE",
+                    "RETAILER_ROLE",
+                    "END_CONSUMER_ROLE",
+                  ].map((role) => (
+                    <option key={role} value={role}>
+                      {role}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="col-12 col-md-5">
+                <TextField
+                  label="Wallet Address"
+                  size="small"
+                  value={grantForm.address}
+                  onChange={(event) =>
+                    setGrantForm((prev) => ({ ...prev, address: event.target.value }))
+                  }
+                  fullWidth
+                />
+              </div>
+              <div className="col-12 col-md-2 d-grid">
+                <Button variant="contained" onClick={grantRole} disabled={busy}>
+                  Grant
+                </Button>
               </div>
             </div>
           </div>
